@@ -1,19 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   MapContainer,
   TileLayer,
   Marker,
   Popup,
   Polyline,
-  Tooltip,
   useMap,
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet.heat";
-
-// 🔐 IMPORTANT: Move API key to .env
-// VITE_ORS_API_KEY=your_key_here
 
 const userIcon = new L.Icon({
   iconUrl: "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
@@ -25,7 +21,6 @@ const destinationIcon = new L.Icon({
   iconSize: [32, 32],
 });
 
-// ✅ Auto center map
 function ChangeMapView({ center }) {
   const map = useMap();
   useEffect(() => {
@@ -34,19 +29,13 @@ function ChangeMapView({ center }) {
   return null;
 }
 
-// 🔥 Heatmap
 function HeatmapLayer({ points }) {
   const map = useMap();
 
   useEffect(() => {
     if (!points.length) return;
-
-    const heat = L.heatLayer(points, {
-      radius: 25,
-      blur: 20,
-      maxZoom: 17,
-    }).addTo(map);
-
+    const heat = L.heatLayer(points, { radius: 25, blur: 20 });
+    heat.addTo(map);
     return () => map.removeLayer(heat);
   }, [points, map]);
 
@@ -54,154 +43,172 @@ function HeatmapLayer({ points }) {
 }
 
 export default function Dashboard() {
-  const [position, setPosition] = useState([28.6139, 77.2090]);
+  const [position, setPosition] = useState([28.6139, 77.209]);
   const [destination, setDestination] = useState(null);
+  const [routeCoords, setRouteCoords] = useState([]);
   const [routeSegments, setRouteSegments] = useState([]);
   const [distance, setDistance] = useState(null);
   const [time, setTime] = useState(null);
   const [search, setSearch] = useState("");
   const [mapType, setMapType] = useState("street");
-  const [policeStations, setPoliceStations] = useState([]);
-  const [heatPoints, setHeatPoints] = useState([]);
-  const [safetyScore, setSafetyScore] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [movingIndex, setMovingIndex] = useState(0);
+  const [showSOSModal, setShowSOSModal] = useState(false);
+  const [crimePoints, setCrimePoints] = useState([]);
+  const [threatLevel, setThreatLevel] = useState(null);
+  const [shareLink, setShareLink] = useState("");
 
-  // 📍 Locate user
-  const locateMe = () => {
-    navigator.geolocation.getCurrentPosition((pos) => {
-      setPosition([pos.coords.latitude, pos.coords.longitude]);
-    });
-  };
+  const intervalRef = useRef(null);
 
-  // 🔎 Search location
-  const searchLocation = async () => {
-    if (!search) return;
+  // 🔥 Simulated Crime Zones
+  useEffect(() => {
+    const simulatedCrime = [
+      [28.61, 77.20, 0.9],
+      [28.62, 77.21, 0.7],
+      [28.60, 77.22, 0.8],
+      [28.615, 77.19, 0.6],
+    ];
+    setCrimePoints(simulatedCrime);
+  }, []);
 
-    const geoRes = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${search}`
-    );
-    const geoData = await geoRes.json();
-    if (!geoData.length) return;
-
-    const dest = [parseFloat(geoData[0].lat), parseFloat(geoData[0].lon)];
-    setDestination(dest);
-
-    fetchRoute(position, dest);
-    fetchPoliceStations(dest);
-  };
-
-  // 🛣 Fetch route
-  const fetchRoute = async (start, end) => {
-    try {
-      const response = await fetch(
-        "https://api.openrouteservice.org/v2/directions/driving-car/geojson",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: import.meta.env.VITE_ORS_API_KEY,
-          },
-          body: JSON.stringify({
-            coordinates: [
-              [start[1], start[0]],
-              [end[1], end[0]],
-            ],
-          }),
-        }
-      );
-
-      const data = await response.json();
-      if (!data.features) return;
-
-      const coords =
-        data.features[0].geometry.coordinates.map((c) => [c[1], c[0]]);
-
-      const totalDistance =
-        (data.features[0].properties.summary.distance / 1000).toFixed(2);
-
-      const totalTime =
-        (data.features[0].properties.summary.duration / 60).toFixed(1);
-
-      setDistance(totalDistance);
-      setTime(totalTime);
-
-      generateSegments(coords);
-
-    } catch (error) {
-      console.error("Route fetch error:", error);
+  // 🚗 Animated Marker
+  useEffect(() => {
+    if (routeCoords.length > 0) {
+      setMovingIndex(0);
+      intervalRef.current = setInterval(() => {
+        setMovingIndex((prev) => {
+          if (prev >= routeCoords.length - 1) {
+            clearInterval(intervalRef.current);
+            return prev;
+          }
+          return prev + 1;
+        });
+      }, 200);
     }
-  };
+    return () => clearInterval(intervalRef.current);
+  }, [routeCoords]);
 
-  // 🧠 AI segmentation
-  const generateSegments = (coords) => {
-    let score = 100;
-    const segments = [];
+  // 🧠 AI Threat Engine
+  const calculateThreat = (coords) => {
+    let riskScore = 0;
 
-    coords.forEach((point, i) => {
-      if (i === coords.length - 1) return;
-
-      const rand = Math.random();
-      let color = "lime";
-      let risk = 0;
-
-      if (rand > 0.6 && rand <= 0.85) {
-        color = "orange";
-        risk = 10;
-      } else if (rand > 0.85) {
-        color = "red";
-        risk = 25;
-      }
-
-      score -= risk;
-
-      segments.push({
-        positions: [coords[i], coords[i + 1]],
-        color,
-        incidents: Math.floor(Math.random() * 30),
+    coords.forEach((point) => {
+      crimePoints.forEach((crime) => {
+        const dist =
+          Math.abs(point[0] - crime[0]) +
+          Math.abs(point[1] - crime[1]);
+        if (dist < 0.01) riskScore += crime[2] * 10;
       });
     });
 
-    setSafetyScore(Math.max(score, 0));
-    setRouteSegments(segments);
+    const hour = new Date().getHours();
+    if (hour >= 20 || hour <= 5) riskScore *= 1.5;
 
-    const heat = coords.map((c) => [c[0], c[1], Math.random()]);
-    setHeatPoints(heat);
+    if (riskScore < 15) return "Low";
+    if (riskScore < 35) return "Medium";
+    return "High";
   };
 
-  // 🚓 Police stations
-  const fetchPoliceStations = async (location) => {
-    const query = `
-      [out:json];
-      node["amenity"="police"](around:5000,${location[0]},${location[1]});
-      out;
-    `;
+  const locateMe = () => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) =>
+        setPosition([pos.coords.latitude, pos.coords.longitude]),
+      () => alert("Location permission denied")
+    );
+  };
 
-    const res = await fetch("https://overpass-api.de/api/interpreter", {
-      method: "POST",
-      body: query,
-    });
+  const searchLocation = async () => {
+    if (!search) return;
+    setLoading(true);
 
-    const data = await res.json();
-    const stations = data.elements.map((el) => [el.lat, el.lon]);
-    setPoliceStations(stations);
+    try {
+      const geoRes = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${search}`
+      );
+      const geoData = await geoRes.json();
+
+      if (!geoData.length) {
+        alert("Location not found");
+        setLoading(false);
+        return;
+      }
+
+      const dest = [
+        parseFloat(geoData[0].lat),
+        parseFloat(geoData[0].lon),
+      ];
+
+      setDestination(dest);
+      await fetchRoute(position, dest);
+    } catch {
+      alert("Search error");
+    }
+
+    setLoading(false);
+  };
+
+  const fetchRoute = async (start, end) => {
+    try {
+      const apiKey = import.meta.env.VITE_ORS_API_KEY;
+
+      const url = `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${apiKey}&start=${start[1]},${start[0]}&end=${end[1]},${end[0]}`;
+
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (!data.features?.length) {
+        alert("No route found");
+        return;
+      }
+
+      const coords = data.features[0].geometry.coordinates.map(
+        (c) => [c[1], c[0]]
+      );
+
+      setRouteCoords(coords);
+
+      // 🎨 Color-coded Segments
+      const segments = coords.map((point) => {
+        let color = "green";
+
+        crimePoints.forEach((crime) => {
+          const dist =
+            Math.abs(point[0] - crime[0]) +
+            Math.abs(point[1] - crime[1]);
+
+          if (dist < 0.005) color = "red";
+          else if (dist < 0.01 && color !== "red") color = "yellow";
+        });
+
+        return { point, color };
+      });
+
+      setRouteSegments(segments);
+      setThreatLevel(calculateThreat(coords));
+
+      setShareLink(
+        `${window.location.origin}?lat=${end[0]}&lng=${end[1]}`
+      );
+
+      const summary = data.features[0].properties.summary;
+      setDistance((summary.distance / 1000).toFixed(2));
+      setTime((summary.duration / 60).toFixed(1));
+    } catch {
+      alert("Route fetch failed");
+    }
   };
 
   return (
     <div className="min-h-screen bg-black text-white">
 
-      {/* NAV */}
       <nav className="flex justify-between px-8 py-4 bg-white/5 border-b border-white/10">
         <h1 className="text-2xl font-bold">DhruvTara ✨</h1>
         <div className="flex gap-3">
-          <button onClick={() => setMapType("street")} className="px-3 py-1 bg-gray-700 rounded">
-            Street
-          </button>
-          <button onClick={() => setMapType("satellite")} className="px-3 py-1 bg-gray-700 rounded">
-            Terrain
-          </button>
+          <button onClick={() => setMapType("street")} className="px-3 py-1 bg-gray-700 rounded">Street</button>
+          <button onClick={() => setMapType("dark")} className="px-3 py-1 bg-gray-700 rounded">Dark</button>
         </div>
       </nav>
 
-      {/* SEARCH */}
       <div className="flex justify-center mt-6 gap-3 px-6">
         <input
           value={search}
@@ -209,48 +216,48 @@ export default function Dashboard() {
           placeholder="Search destination..."
           className="p-3 rounded-lg bg-white/10 w-full max-w-xl"
         />
-        <button onClick={searchLocation} className="px-5 bg-green-600 rounded-lg">
-          Route
-        </button>
-        <button onClick={locateMe} className="px-5 bg-blue-600 rounded-lg">
-          📍
-        </button>
+        <button onClick={searchLocation} className="px-5 bg-green-600 rounded-lg">Route</button>
+        <button onClick={locateMe} className="px-5 bg-blue-600 rounded-lg">📍</button>
       </div>
 
-      {/* AI SCORE */}
-      {safetyScore !== null && (
-        <div className="text-center mt-4 text-xl">
-          🛡 AI Safety Score:{" "}
-          <span
-            className={
-              safetyScore > 70
-                ? "text-green-400"
-                : safetyScore > 40
-                ? "text-yellow-400"
-                : "text-red-500"
-            }
-          >
-            {safetyScore}%
-          </span>
-
-          {distance && (
-            <div className="text-sm text-gray-400 mt-2">
-              Distance: {distance} km | ETA: {time} mins
-            </div>
-          )}
+      {distance && (
+        <div className="text-center mt-4">
+          Distance: {distance} km | ETA: {time} mins
         </div>
       )}
 
-      {/* MAP */}
+      {threatLevel && (
+        <div className="text-center mt-2">
+          AI Threat Level:{" "}
+          <span className={
+            threatLevel === "Low"
+              ? "text-green-400"
+              : threatLevel === "Medium"
+              ? "text-yellow-400"
+              : "text-red-500"
+          }>
+            {threatLevel}
+          </span>
+        </div>
+      )}
+
+      {shareLink && (
+        <div className="text-center text-blue-400 break-all mt-2">
+          🔗 Live Share: {shareLink}
+        </div>
+      )}
+
       <div className="m-8 rounded-2xl overflow-hidden">
         <MapContainer center={position} zoom={13} style={{ height: "600px" }}>
           <ChangeMapView center={destination || position} />
-
-          {mapType === "street" ? (
+          {mapType === "street" && (
             <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-          ) : (
-            <TileLayer url="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png" />
           )}
+          {mapType === "dark" && (
+            <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+          )}
+
+          <HeatmapLayer points={crimePoints} />
 
           <Marker position={position} icon={userIcon}>
             <Popup>You 🚀</Popup>
@@ -262,41 +269,65 @@ export default function Dashboard() {
             </Marker>
           )}
 
-          {routeSegments.map((seg, i) => (
-            <Polyline
-              key={i}
-              positions={seg.positions}
-              pathOptions={{
-                color: seg.color,
-                weight: 6,
-                dashArray: seg.color === "red" ? "10" : null,
-              }}
-            >
-              <Tooltip>Crime Incidents: {seg.incidents}</Tooltip>
-            </Polyline>
-          ))}
+          {routeSegments.length > 0 &&
+            routeSegments.map((seg, index) =>
+              routeSegments[index + 1] ? (
+                <Polyline
+                  key={index}
+                  positions={[
+                    seg.point,
+                    routeSegments[index + 1].point,
+                  ]}
+                  pathOptions={{ color: seg.color, weight: 6 }}
+                />
+              ) : null
+            )}
 
-          {policeStations.map((station, i) => (
-            <Marker key={i} position={station}>
-              <Popup>🚓 Police Station</Popup>
+          {routeCoords.length > 0 && (
+            <Marker position={routeCoords[movingIndex]} icon={userIcon}>
+              <Popup>Travelling...</Popup>
             </Marker>
-          ))}
-
-          <HeatmapLayer points={heatPoints} />
+          )}
         </MapContainer>
       </div>
 
-      {/* SOS */}
       <button
         className="fixed bottom-10 right-10 bg-red-600 w-16 h-16 rounded-full text-xl shadow-2xl animate-pulse"
-        onClick={() => alert("🚨 Emergency Alert Sent!")}
+        onClick={() => setShowSOSModal(true)}
       >
         SOS
       </button>
 
+      {showSOSModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center">
+          <div className="bg-gray-900 p-8 rounded-2xl w-96 text-center space-y-4">
+            <h2 className="text-xl font-bold text-red-500">Emergency Alert</h2>
+            <button
+              className="bg-red-600 px-4 py-2 rounded"
+              onClick={() => {
+                alert("🚨 Live location sent!");
+                setShowSOSModal(false);
+              }}
+            >
+              Send Alert
+            </button>
+            <button
+              className="text-gray-400"
+              onClick={() => setShowSOSModal(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
+
+
+
+
 
 
 
