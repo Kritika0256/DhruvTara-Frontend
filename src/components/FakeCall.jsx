@@ -1,9 +1,9 @@
-import { Link } from "react-router-dom";
 import { useState, useRef, useEffect } from "react";
 import ringtone from "../assets/ringtone.mp3";
+import dadVideo from "../assets/dad.mp4";
 import dadImage from "../assets/dad.jpg";
 
-export default function Navbar() {
+function FakeCall() {
   const [incoming, setIncoming] = useState(false);
   const [inCall, setInCall] = useState(false);
   const [seconds, setSeconds] = useState(0);
@@ -14,13 +14,15 @@ export default function Navbar() {
   const autoRejectRef = useRef(null);
   const longPressRef = useRef(null);
 
-  // ✅ Cleanup
+  // ✅ Cleanup on unmount
   useEffect(() => {
     return () => {
       clearTimeout(autoRejectRef.current);
       clearTimeout(longPressRef.current);
       clearInterval(timerRef.current);
-      if (audioRef.current) audioRef.current.pause();
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
     };
   }, []);
 
@@ -31,8 +33,12 @@ export default function Navbar() {
       audioRef.current.loop = true;
       audioRef.current.play();
     }
-    if (navigator.vibrate) navigator.vibrate([500, 300, 500]);
-    autoRejectRef.current = setTimeout(() => endCall(), 20000);
+    if (navigator.vibrate) {
+      navigator.vibrate([500, 300, 500]);
+    }
+    autoRejectRef.current = setTimeout(() => {
+      endCall();
+    }, 20000);
   };
 
   const pickCall = () => {
@@ -44,7 +50,9 @@ export default function Navbar() {
     setIncoming(false);
     setShake(false);
     setInCall(true);
-    timerRef.current = setInterval(() => setSeconds(prev => prev + 1), 1000);
+    timerRef.current = setInterval(() => {
+      setSeconds(prev => prev + 1);
+    }, 1000);
   };
 
   const endCall = () => {
@@ -61,10 +69,14 @@ export default function Navbar() {
   };
 
   const handleMouseDown = () => {
-    longPressRef.current = setTimeout(() => alert("🚨 SOS Alert Triggered!"), 2000);
+    longPressRef.current = setTimeout(() => {
+      alert("🚨 SOS Alert Triggered!");
+    }, 2000);
   };
 
-  const handleMouseUp = () => clearTimeout(longPressRef.current);
+  const handleMouseUp = () => {
+    clearTimeout(longPressRef.current);
+  };
 
   const formatTime = () => {
     const mins = Math.floor(seconds / 60);
@@ -74,6 +86,7 @@ export default function Navbar() {
 
   return (
     <>
+      {/* ✅ Shake keyframes fix */}
       <style>{`
         @keyframes shake {
           0%   { transform: rotate(0deg); }
@@ -82,48 +95,38 @@ export default function Navbar() {
           75%  { transform: rotate(-8deg); }
           100% { transform: rotate(0deg); }
         }
-        .shake-phone { animation: shake 0.5s infinite; }
-        @keyframes pulse-green {
-          0%, 100% { box-shadow: 0 0 8px rgba(37,211,102,0.6); }
-          50%       { box-shadow: 0 0 18px rgba(37,211,102,1); }
+        .shake-phone {
+          animation: shake 0.5s infinite;
         }
-        .fakecall-btn { animation: pulse-green 2s infinite; }
       `}</style>
 
-      {/* ✅ Navbar */}
-      <nav className="bg-gradient-to-r from-[#1f1c2c] to-[#2c3e50] text-white px-8 py-4 flex justify-between items-center">
-        <div className="text-2xl font-bold">DhruvTara ✨</div>
-        <div className="flex gap-6 text-sm items-center">
-          <Link to="/home">Home</Link>
-          <Link to="/dashboard">Dashboard</Link>
-          <Link to="/login">Login</Link>
-          <Link to="/register">Register</Link>
+      {/* Fake Call Button */}
+      <button
+        onClick={startFakeCall}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
+        onTouchStart={handleMouseDown}
+        onTouchEnd={handleMouseUp}
+        style={{
+          position: "fixed",
+          bottom: "120px",
+          right: "30px",
+          padding: "12px 18px",
+          background: "#25D366",
+          color: "white",
+          border: "none",
+          borderRadius: "25px",
+          cursor: "pointer",
+          zIndex: 1000,
+          fontSize: "16px",
+          fontWeight: "600",
+          boxShadow: "0 4px 15px rgba(37,211,102,0.4)"
+        }}
+      >
+        📞 Fake Call
+      </button>
 
-          {/* 📞 Fake Call Button */}
-          <button
-            className="fakecall-btn"
-            onClick={startFakeCall}
-            onMouseDown={handleMouseDown}
-            onMouseUp={handleMouseUp}
-            onTouchStart={handleMouseDown}
-            onTouchEnd={handleMouseUp}
-            style={{
-              padding: "8px 16px",
-              background: "#25D366",
-              color: "white",
-              border: "none",
-              borderRadius: "20px",
-              cursor: "pointer",
-              fontSize: "13px",
-              fontWeight: "600",
-            }}
-          >
-            📞 Fake Call
-          </button>
-        </div>
-      </nav>
-
-      {/* Incoming Call Screen */}
+      {/* Incoming Screen */}
       {incoming && (
         <div style={styles.screen}>
           <div className={shake ? "shake-phone" : ""}>
@@ -131,6 +134,7 @@ export default function Navbar() {
           </div>
           <h2 style={{ color: "white", marginTop: "10px" }}>Dad</h2>
           <p style={{ color: "lightgray" }}>Incoming Video Call...</p>
+
           <div style={styles.buttonRow}>
             <button onClick={endCall} style={styles.reject}>❌</button>
             <button onClick={pickCall} style={styles.accept}>✅</button>
@@ -138,14 +142,19 @@ export default function Navbar() {
         </div>
       )}
 
-      {/* ✅ Call Screen — photo + timer (no video) */}
+      {/* Video Call Screen */}
       {inCall && (
         <div style={styles.screen}>
-          <img src={dadImage} alt="Dad" style={styles.avatar} />
-          <h2 style={{ color: "white", marginTop: "10px" }}>Dad</h2>
-          <p style={{ color: "#25D366", fontSize: "18px" }}>{formatTime()}</p>
-          <p style={{ color: "lightgray", marginTop: "10px" }}>📞 Call in progress...</p>
-          <button onClick={endCall} style={styles.rejectBottom}>📵 End Call</button>
+          <h2 style={{ color: "white" }}>Dad</h2>
+          <p style={{ color: "lightgray" }}>{formatTime()}</p>
+          <video
+            src={dadVideo}
+            autoPlay
+            style={{ width: "300px", borderRadius: "20px", marginTop: "20px" }}
+          />
+          <button onClick={endCall} style={styles.rejectBottom}>
+            📵 End Call
+          </button>
         </div>
       )}
 
@@ -165,20 +174,20 @@ const styles = {
     flexDirection: "column",
     justifyContent: "center",
     alignItems: "center",
-    zIndex: 2000,
+    zIndex: 2000
   },
   avatar: {
     width: "120px",
     height: "120px",
     borderRadius: "50%",
     objectFit: "cover",
-    marginBottom: "20px",
+    marginBottom: "20px"
   },
   buttonRow: {
     display: "flex",
     justifyContent: "space-between",
     width: "200px",
-    marginTop: "40px",
+    marginTop: "40px"
   },
   accept: {
     background: "green",
@@ -188,7 +197,7 @@ const styles = {
     borderRadius: "50%",
     fontSize: "20px",
     color: "white",
-    cursor: "pointer",
+    cursor: "pointer"
   },
   reject: {
     background: "red",
@@ -198,7 +207,7 @@ const styles = {
     borderRadius: "50%",
     fontSize: "20px",
     color: "white",
-    cursor: "pointer",
+    cursor: "pointer"
   },
   rejectBottom: {
     marginTop: "30px",
@@ -208,10 +217,8 @@ const styles = {
     border: "none",
     borderRadius: "20px",
     fontSize: "16px",
-    cursor: "pointer",
-  },
+    cursor: "pointer"
+  }
 };
 
-
-
-
+export default FakeCall;
