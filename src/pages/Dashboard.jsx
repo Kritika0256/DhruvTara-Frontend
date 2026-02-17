@@ -17,22 +17,17 @@ const userIcon = new L.Icon({
   iconUrl: "https://maps.google.com/mapfiles/ms/icons/red-dot.png",
   iconSize: [32, 32],
 });
-
 const destinationIcon = new L.Icon({
   iconUrl: "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
   iconSize: [32, 32],
 });
 
-/* =============== MAP CENTER HELPER =============== */
 function ChangeMapView({ center }) {
   const map = useMap();
-  useEffect(() => {
-    map.setView(center, 13);
-  }, [center, map]);
+  useEffect(() => { map.setView(center, 13); }, [center, map]);
   return null;
 }
 
-/* ================= HEATMAP ================= */
 function HeatmapLayer({ points }) {
   const map = useMap();
   useEffect(() => {
@@ -103,7 +98,7 @@ const STATE_BOUNDS = [
   { state: "Assam",            minLat: 24.1, maxLat: 27.9, minLng: 89.7, maxLng: 96.0 },
 ];
 
-/* ====== NCRB REAL CRIME DATA ====== */
+/* ====== NCRB DATA ====== */
 const NCRB_DATA = {
   "2022": [
     { state: "Uttar Pradesh",  total: 156088, murder: 3491, rape: 3690, kidnapping: 15219, robbery: 4390 },
@@ -173,7 +168,7 @@ const NCRB_DATA = {
   ],
 };
 
-/* ====== GET STATE FROM COORDINATES ====== */
+/* ====== GET STATE FROM COORDS ====== */
 const getStateFromCoords = (lat, lng) => {
   for (const s of STATE_BOUNDS) {
     if (lat >= s.minLat && lat <= s.maxLat && lng >= s.minLng && lng <= s.maxLng) {
@@ -183,36 +178,53 @@ const getStateFromCoords = (lat, lng) => {
   return null;
 };
 
+/* ====== SAFE WAYPOINT — midpoint shifted toward safer zone ====== */
+const getSafeWaypoint = (start, end) => {
+  const midLat = (start[0] + end[0]) / 2;
+  const midLng = (start[1] + end[1]) / 2;
+  const data = NCRB_DATA["2022"];
+  const currentState = getStateFromCoords(midLat, midLng);
+  const currentData = data.find((d) => d.state === currentState);
+
+  // If midpoint is in high crime area, shift slightly
+  if (currentData && currentData.total > 80000) {
+    return [midLat + 0.3, midLng - 0.3]; // shift to avoid high crime zone
+  }
+  return [midLat, midLng];
+};
+
 /* ================= DASHBOARD ================= */
 export default function Dashboard() {
   const [position, setPosition] = useState([28.6139, 77.209]);
   const [destination, setDestination] = useState(null);
   const [routeCoords, setRouteCoords] = useState([]);
   const [routeSegments, setRouteSegments] = useState([]);
+  const [safeRouteCoords, setSafeRouteCoords] = useState([]);
   const [distance, setDistance] = useState(null);
   const [time, setTime] = useState(null);
+  const [safeDistance, setSafeDistance] = useState(null);
+  const [safeTime, setSafeTime] = useState(null);
   const [search, setSearch] = useState("");
   const [policeStations, setPoliceStations] = useState([]);
   const [heatPoints, setHeatPoints] = useState([]);
   const [safetyScore, setSafetyScore] = useState(null);
   const [safetyLabel, setSafetyLabel] = useState("");
+  const [safeScore, setSafeScore] = useState(null);
   const [movingIndex, setMovingIndex] = useState(0);
   const [crimeYear, setCrimeYear] = useState("2022");
+  const [showSafeRoute, setShowSafeRoute] = useState(true);
 
   const intervalRef = useRef(null);
+  const ORS_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImNiOTdkNWQwY2QyYzQ5ZjQ4YzU3MzFkOWMzN2MyNTdhIiwiaCI6Im11cm11cjY0In0=";
 
-  /* ============ LOAD HEATMAP ============ */
+  /* ============ HEATMAP ============ */
   useEffect(() => {
     const data = NCRB_DATA[crimeYear];
     const points = data.map((row) => {
       const coords = STATE_COORDS[row.state];
       if (!coords) return null;
       const intensity = Math.min(row.total / 160000, 1.0);
-      return [
-        coords[0] + (Math.random() - 0.5) * 1.5,
-        coords[1] + (Math.random() - 0.5) * 1.5,
-        intensity,
-      ];
+      return [coords[0] + (Math.random() - 0.5) * 1.5, coords[1] + (Math.random() - 0.5) * 1.5, intensity];
     }).filter(Boolean);
     setHeatPoints(points);
   }, [crimeYear]);
@@ -225,7 +237,7 @@ export default function Dashboard() {
     );
   };
 
-  /* ============ SEARCH LOCATION ============ */
+  /* ============ SEARCH ============ */
   const searchLocation = async () => {
     if (!search) return;
     const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${search}`);
@@ -234,15 +246,15 @@ export default function Dashboard() {
     const dest = [parseFloat(geoData[0].lat), parseFloat(geoData[0].lon)];
     setDestination(dest);
     fetchRoute(position, dest);
+    fetchSafeRoute(position, dest);
     fetchPoliceStations(dest);
   };
 
-  /* ============ FETCH ROUTE ============ */
+  /* ============ FETCH ORIGINAL ROUTE ============ */
   const fetchRoute = async (start, end) => {
     try {
-      const apiKey = import.meta.env.VITE_ORS_API_KEY;
       const res = await fetch(
-        `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${apiKey}&start=${start[1]},${start[0]}&end=${end[1]},${end[0]}`
+        `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${ORS_KEY}&start=${start[1]},${start[0]}&end=${end[1]},${end[0]}`
       );
       const data = await res.json();
       if (!data.features?.length) { alert("No route found"); return; }
@@ -254,35 +266,83 @@ export default function Dashboard() {
       setTime((summary.duration / 60).toFixed(1));
     } catch (err) {
       console.error(err);
-      alert("Route fetch failed");
     }
   };
 
-  /* ============ ACCURATE SAFETY SCORE ============ */
-  const generateSegments = (coords) => {
+  /* ============ FETCH SAFE ROUTE (via waypoint) ============ */
+  const fetchSafeRoute = async (start, end) => {
+    try {
+      const waypoint = getSafeWaypoint(start, end);
+      const res = await fetch(
+        `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${ORS_KEY}&start=${start[1]},${start[0]}&end=${end[1]},${end[0]}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": ORS_KEY },
+          body: JSON.stringify({
+            coordinates: [
+              [start[1], start[0]],
+              [waypoint[1], waypoint[0]],
+              [end[1], end[0]],
+            ],
+            preference: "recommended",
+          }),
+        }
+      );
+      const data = await res.json();
+      if (!data.features?.length) return;
+      const coords = data.features[0].geometry.coordinates.map((c) => [c[1], c[0]]);
+      setSafeRouteCoords(coords);
+      const summary = data.features[0].properties.summary;
+      setSafeDistance((summary.distance / 1000).toFixed(2));
+      setSafeTime((summary.duration / 60).toFixed(1));
+      // Calculate safe route score
+      const score = calculateScore(coords);
+      setSafeScore(score);
+    } catch (err) {
+      console.error("Safe route error:", err);
+    }
+  };
+
+  /* ============ CALCULATE SCORE ============ */
+  const calculateScore = (coords) => {
     const data = NCRB_DATA[crimeYear];
     const maxCrime = 156088;
     const step = Math.max(1, Math.floor(coords.length / 10));
     const sampled = coords.filter((_, i) => i % step === 0);
+    let totalScore = 0, counted = 0;
+    sampled.forEach(([lat, lng]) => {
+      const state = getStateFromCoords(lat, lng);
+      if (state) {
+        const stateData = data.find((d) => d.state === state);
+        if (stateData) {
+          totalScore += Math.round((1 - stateData.total / maxCrime) * 100);
+          counted++;
+        }
+      }
+    });
+    return counted > 0 ? Math.round(totalScore / counted) : 72;
+  };
 
-    let totalScore = 0;
-    let counted = 0;
-
+  /* ============ GENERATE SEGMENTS ============ */
+  const generateSegments = (coords) => {
+    const data = NCRB_DATA[crimeYear];
+    const score = calculateScore(coords);
+    setSafetyScore(score);
+    setSafetyLabel(
+      score >= 70 ? "Safe Route ✅" :
+      score >= 40 ? "Moderate Risk ⚠️" : "High Risk 🚨"
+    );
     const segments = [];
-
     coords.forEach((point, i) => {
       if (i === coords.length - 1) return;
       const [lat, lng] = coords[i];
       const state = getStateFromCoords(lat, lng);
       const stateData = data.find((d) => d.state === state);
-
       let color = "green";
       if (stateData) {
         if (stateData.total > 100000) color = "red";
         else if (stateData.total > 50000) color = "orange";
-        else color = "green";
       }
-
       segments.push({
         positions: [coords[i], coords[i + 1]],
         color,
@@ -290,27 +350,6 @@ export default function Dashboard() {
         state: state || "Unknown",
       });
     });
-
-    // Calculate score from sampled points
-    sampled.forEach(([lat, lng]) => {
-      const state = getStateFromCoords(lat, lng);
-      if (state) {
-        const stateData = data.find((d) => d.state === state);
-        if (stateData) {
-          const crimeRatio = stateData.total / maxCrime;
-          totalScore += Math.round((1 - crimeRatio) * 100);
-          counted++;
-        }
-      }
-    });
-
-    const finalScore = counted > 0 ? Math.round(totalScore / counted) : 72;
-    setSafetyScore(finalScore);
-    setSafetyLabel(
-      finalScore >= 70 ? "Safe Route ✅" :
-      finalScore >= 40 ? "Moderate Risk ⚠️" :
-                         "High Risk 🚨"
-    );
     setRouteSegments(segments);
   };
 
@@ -322,7 +361,7 @@ export default function Dashboard() {
     setPoliceStations(data.elements.map((e) => [e.lat, e.lon]));
   };
 
-  /* ============ MOVE MARKER ============ */
+  /* ============ MOVING MARKER ============ */
   useEffect(() => {
     if (!routeCoords.length) return;
     setMovingIndex(0);
@@ -334,7 +373,6 @@ export default function Dashboard() {
 
   const tableData = NCRB_DATA[crimeYear];
 
-  /* ================= RENDER ================= */
   return (
     <div className="min-h-screen bg-black text-white">
 
@@ -355,15 +393,40 @@ export default function Dashboard() {
         </button>
       </div>
 
-      {/* SAFETY INFO */}
+      {/* ROUTE COMPARISON */}
       {safetyScore !== null && (
-        <div className="text-center mb-4">
-          <span className={`text-2xl font-bold ${safetyScore >= 70 ? "text-green-400" : safetyScore >= 40 ? "text-yellow-400" : "text-red-400"}`}>
-            🛡 Safety Score: {safetyScore}% — {safetyLabel}
-          </span>
-          <div className="text-sm text-gray-400 mt-1">
-            Distance: {distance} km | ETA: {time} mins
+        <div className="flex justify-center gap-6 mb-4 flex-wrap px-6">
+          {/* Original Route */}
+          <div className="bg-white/5 border border-white/10 rounded-xl px-6 py-3 text-center">
+            <div className="text-xs text-gray-400 mb-1">🔵 Original Route</div>
+            <div className={`text-lg font-bold ${safetyScore >= 70 ? "text-green-400" : safetyScore >= 40 ? "text-yellow-400" : "text-red-400"}`}>
+              🛡 {safetyScore}% — {safetyLabel}
+            </div>
+            <div className="text-xs text-gray-400 mt-1">{distance} km | {time} mins</div>
           </div>
+
+          {/* Safe Route */}
+          {safeRouteCoords.length > 0 && (
+            <div className="bg-white/5 border border-green-500/40 rounded-xl px-6 py-3 text-center">
+              <div className="text-xs text-green-400 mb-1">🟢 Safer Alternative Route</div>
+              <div className="text-lg font-bold text-green-400">
+                🛡 {safeScore}% — {safeScore >= 70 ? "Safe ✅" : safeScore >= 40 ? "Moderate ⚠️" : "Risky 🚨"}
+              </div>
+              <div className="text-xs text-gray-400 mt-1">{safeDistance} km | {safeTime} mins</div>
+            </div>
+          )}
+
+          {/* Toggle */}
+          {safeRouteCoords.length > 0 && (
+            <div className="flex items-center">
+              <button
+                onClick={() => setShowSafeRoute(!showSafeRoute)}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${showSafeRoute ? "bg-green-600 hover:bg-green-700" : "bg-white/10 hover:bg-white/20"}`}
+              >
+                {showSafeRoute ? "🟢 Safe Route ON" : "⚪ Safe Route OFF"}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -374,26 +437,31 @@ export default function Dashboard() {
           <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
           <HeatmapLayer points={heatPoints} />
 
-          <Marker position={position} icon={userIcon}>
-            <Popup>📍 You</Popup>
-          </Marker>
+          <Marker position={position} icon={userIcon}><Popup>📍 You</Popup></Marker>
 
           {destination && (
-            <Marker position={destination} icon={destinationIcon}>
-              <Popup>🏁 Destination</Popup>
-            </Marker>
+            <Marker position={destination} icon={destinationIcon}><Popup>🏁 Destination</Popup></Marker>
           )}
 
+          {/* Original Route */}
           {routeSegments.map((seg, i) => (
-            <Polyline key={i} positions={seg.positions} pathOptions={{ color: seg.color, weight: 6 }}>
+            <Polyline key={`orig-${i}`} positions={seg.positions} pathOptions={{ color: seg.color, weight: 5, opacity: 0.8 }}>
               <Tooltip>📍 {seg.state} | ⚠️ Incidents: {seg.incidents}</Tooltip>
             </Polyline>
           ))}
 
+          {/* Safe Route — blue dashed */}
+          {showSafeRoute && safeRouteCoords.length > 0 && (
+            <Polyline
+              positions={safeRouteCoords}
+              pathOptions={{ color: "#00ff88", weight: 5, opacity: 0.9, dashArray: "10, 8" }}
+            >
+              <Tooltip>🟢 Safer Alternative Route</Tooltip>
+            </Polyline>
+          )}
+
           {policeStations.map((p, i) => (
-            <Marker key={i} position={p}>
-              <Popup>🚓 Police Station</Popup>
-            </Marker>
+            <Marker key={i} position={p}><Popup>🚓 Police Station</Popup></Marker>
           ))}
 
           {routeCoords.length > 0 && (
@@ -404,20 +472,26 @@ export default function Dashboard() {
         </MapContainer>
       </div>
 
-      {/* CRIME DATA TABLE */}
+      {/* MAP LEGEND */}
+      {routeCoords.length > 0 && (
+        <div className="mx-6 mt-3 flex gap-4 flex-wrap text-xs text-gray-400">
+          <span>🔴 High Crime Zone</span>
+          <span>🟠 Moderate Zone</span>
+          <span>🟢 Safe Zone</span>
+          <span style={{color: "#00ff88"}}>━ ━ Safer Alternative</span>
+        </div>
+      )}
+
+      {/* CRIME TABLE */}
       <div className="mx-6 mt-8 mb-12">
         <div className="flex flex-wrap justify-between items-center mb-4 gap-3">
-          <h2 className="text-xl font-bold text-purple-400">
-            📊 India Crime Statistics — NCRB Data
-          </h2>
+          <h2 className="text-xl font-bold text-purple-400">📊 India Crime Statistics — NCRB Data</h2>
           <div className="flex gap-2">
             {["2020", "2021", "2022"].map((y) => (
               <button
                 key={y}
                 onClick={() => setCrimeYear(y)}
-                className={`px-4 py-1 rounded-lg text-sm font-semibold transition-all ${
-                  crimeYear === y ? "bg-purple-600 text-white" : "bg-white/10 hover:bg-white/20 text-gray-300"
-                }`}
+                className={`px-4 py-1 rounded-lg text-sm font-semibold transition-all ${crimeYear === y ? "bg-purple-600 text-white" : "bg-white/10 hover:bg-white/20 text-gray-300"}`}
               >
                 {y}
               </button>
@@ -448,7 +522,7 @@ export default function Dashboard() {
                 return (
                   <tr key={i} className={`border-b border-white/5 ${i % 2 === 0 ? "bg-white/5" : "bg-transparent"} hover:bg-purple-900/20 transition-colors`}>
                     <td className="px-4 py-3 text-gray-500">{i + 1}</td>
-                    <td className="px-4 py-3 font-semibold text-white">{row.state}</td>
+                    <td className="px-4 py-3 font-semibold">{row.state}</td>
                     <td className="px-4 py-3 text-yellow-300 font-bold">{row.total.toLocaleString("en-IN")}</td>
                     <td className="px-4 py-3 text-red-300">{row.murder.toLocaleString("en-IN")}</td>
                     <td className="px-4 py-3 text-orange-300">{row.rape.toLocaleString("en-IN")}</td>
@@ -461,15 +535,11 @@ export default function Dashboard() {
             </tbody>
           </table>
         </div>
-
-        <p className="text-xs text-gray-500 mt-3 text-center">
-          📌 Source: National Crime Records Bureau (NCRB) — data.gov.in
-        </p>
+        <p className="text-xs text-gray-500 mt-3 text-center">📌 Source: National Crime Records Bureau (NCRB) — data.gov.in</p>
       </div>
     </div>
   );
 }
-
 
 
 
